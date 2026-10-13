@@ -294,7 +294,7 @@ function Comment({
             draggable={false}
             className="absolute inset-0 size-full object-cover"
           />
-          {(file.cover.video || file.cover.gif) && <MediaLabel video={file.cover.video} small />}
+          {(file.cover.video || file.cover.gif) && <MediaLabel video={!!file.cover.video} small />}
         </button>
       )}
       <div className="min-w-0 flex-1">

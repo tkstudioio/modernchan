@@ -1,20 +1,74 @@
+"use client";
+
+import { useEffect, useRef } from "react";
 import type { Cover } from "@/lib/media";
 
-// Immagine grande di una card, con le proporzioni del file e l'etichetta per GIF e video.
+// Immagine grande di una card, con le proporzioni del file e l'etichetta per
+// GIF e video. I video partono muti quando sono visibili e si fermano quando
+// escono dallo schermo.
 export function CoverImage({ cover }: { cover: Cover }) {
   return (
     <div className="relative max-h-[70vh] w-full bg-black" style={{ aspectRatio: `${cover.w} / ${cover.h}` }}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={cover.url}
-        alt=""
-        loading="lazy"
-        decoding="async"
-        draggable={false}
-        className="absolute inset-0 size-full object-contain"
-      />
-      {(cover.video || cover.gif) && <MediaLabel video={cover.video} />}
+      {cover.video ? (
+        <CardVideo src={cover.video} poster={cover.url} />
+      ) : (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={cover.url}
+          alt=""
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+          className="absolute inset-0 size-full object-contain"
+        />
+      )}
+      {(cover.video || cover.gif) && <MediaLabel video={!!cover.video} />}
     </div>
+  );
+}
+
+// quota del video che deve essere sullo schermo per farlo partire
+const VISIBLE = 0.6;
+
+function CardVideo({ src, poster }: { src: string; poster: string }) {
+  const ref = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const v = ref.current;
+    if (!v) return;
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (e.isIntersecting) {
+          // src solo alla prima comparsa: i video mai visti non si scaricano
+          if (!v.getAttribute("src")) v.src = src;
+          v.play().catch(() => {});
+        } else {
+          v.pause();
+        }
+      },
+      { threshold: VISIBLE },
+    );
+    io.observe(v);
+    return () => {
+      io.disconnect();
+      // interrompe il download quando la card sparisce
+      v.pause();
+      v.removeAttribute("src");
+      v.load();
+    };
+  }, [src]);
+
+  return (
+    <video
+      ref={ref}
+      poster={poster}
+      muted
+      loop
+      playsInline
+      disablePictureInPicture
+      preload="none"
+      className="absolute inset-0 size-full object-contain"
+    />
   );
 }
 

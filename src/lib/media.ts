@@ -85,8 +85,9 @@ export function threadToMedia(board: string, op: string, posts: RawPost[]): Medi
 }
 
 // Immagine di un post da mostrare in una card: preview piccola per le
-// immagini, miniatura per GIF e video
-export type Cover = { url: string; w: number; h: number; video: boolean; gif: boolean };
+// immagini, miniatura per GIF e video. I video hanno anche il file, che la
+// card riproduce muto
+export type Cover = { url: string; w: number; h: number; video: string | null; gif: boolean };
 
 const CARD_PREVIEW_WIDTH = 640;
 const hasMedia = (p: RawPost) => !!p.tim && !p.filedeleted && !!p.ext && MEDIA_EXT.has(p.ext);
@@ -99,7 +100,7 @@ function coverOf(board: string, p: RawPost): Cover | null {
       : mediaUrl(board, `${p.tim}s.jpg`),
     w: p.w ?? 1,
     h: p.h ?? 1,
-    video: p.ext === ".webm" || p.ext === ".mp4",
+    video: p.ext === ".webm" || p.ext === ".mp4" ? mediaUrl(board, `${p.tim}${p.ext}`) : null,
     gif: p.ext === ".gif",
   };
 }
