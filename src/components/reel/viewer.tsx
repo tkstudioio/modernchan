@@ -212,15 +212,38 @@ export function Viewer({
     onIndexChange?.(idx);
   }, [idx, onIndexChange]);
 
+  // in download: il media in visione, o il suo originale in modalità visualizzazione
+  const [fullBusy, setFullBusy] = useState(false);
+  const busy = (!loaded && !failed) || fullBusy;
   useEffect(() => {
-    onBusyChange?.(!loaded && !failed);
-  }, [loaded, failed, onBusyChange]);
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
 
-  // precarica l'immagine successiva
+  // precarica l'immagine successiva, ma solo a media corrente scaricato per non
+  // rubargli banda. Un precaricamento rimasto indietro viene interrotto, salvo
+  // che sia proprio il media ora in visione (la richiesta in corso serve).
+  const preload = useRef<HTMLImageElement | null>(null);
+  const currentSrc = item?.preview;
   useEffect(() => {
     const n = items[(idx + 1) % items.length];
-    if (n && !n.video) new Image().src = n.src;
-  }, [idx, items]);
+    const want = loaded && n && !n.video ? n.preview : null;
+    const old = preload.current;
+    if (old?.dataset.src === want) return;
+    if (old && old.dataset.src !== currentSrc) old.removeAttribute("src");
+    preload.current = null;
+    if (!want) return;
+    const img = new Image();
+    img.dataset.src = want;
+    img.src = want;
+    preload.current = img;
+  }, [idx, items, loaded, currentSrc]);
+
+  useEffect(
+    () => () => {
+      if (preload.current && !preload.current.complete) preload.current.removeAttribute("src");
+    },
+    [],
+  );
 
   useEffect(() => {
     const onChange = () => setFullscreen(!!document.fullscreenElement);
@@ -328,15 +351,12 @@ export function Viewer({
                 onMutedFallback={() => setMuted(true)}
               />
             ) : (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={item.src}
-                alt={item.name}
-                draggable={false}
-                fetchPriority="high"
-                className="absolute inset-0 size-full object-contain"
+              <ImageSlide
+                item={item}
+                full={inspecting}
                 onLoad={() => setLoadedId(item.id)}
                 onError={() => setErrorId(item.id)}
+                onFullBusy={setFullBusy}
               />
             )}
           </Stage>
@@ -402,6 +422,16 @@ export function Viewer({
         />
       </div>
 
+      {/* senza UI non c'è altro modo di capire che l'originale sta arrivando */}
+      {inspecting && busy && (
+        <div
+          className="pointer-events-none absolute bottom-6 right-4 z-30 grid size-11 place-items-center rounded-full bg-black/50 backdrop-blur"
+          aria-label="Caricamento"
+        >
+          <span className="size-5 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+        </div>
+      )}
+
       {toast && (
         <div className="pointer-events-none absolute left-1/2 top-20 z-30 -translate-x-1/2 rounded-full bg-black/70 px-4 py-2 text-sm backdrop-blur">
           {toast}
@@ -436,6 +466,70 @@ function RoundButton({
     <button onClick={onClick} title={label} aria-label={label} className={cls}>
       {children}
     </button>
+  );
+}
+
+// Come per il video, `src` è impostato nell'effetto: così il cleanup può
+// interrompere il download quando l'immagine non serve più prima della fine.
+function useAbortableSrc(src: string | null) {
+  const ref = useRef<HTMLImageElement>(null);
+  useEffect(() => {
+    const img = ref.current;
+    if (!img || !src) return;
+    img.src = src;
+    return () => {
+      if (!img.complete) img.removeAttribute("src");
+    };
+  }, [src]);
+  return ref;
+}
+
+type ImageProps = {
+  item: Media;
+  full: boolean; // modalità visualizzazione: serve l'originale
+  onLoad: () => void;
+  onError: () => void;
+  onFullBusy: (busy: boolean) => void;
+};
+
+// Mostra la preview; l'originale si scarica solo in modalità visualizzazione e
+// compare sopra la preview quando è pronto. Se si esce prima, il download si
+// interrompe; se è già arrivato resta.
+function ImageSlide({ item, full, onLoad, onError, onFullBusy }: ImageProps) {
+  const [fullLoaded, setFullLoaded] = useState(false);
+  const needFull = item.preview !== item.src && (full || fullLoaded);
+  const previewRef = useAbortableSrc(item.preview);
+  const fullRef = useAbortableSrc(needFull ? item.src : null);
+
+  useEffect(() => {
+    onFullBusy(needFull && !fullLoaded);
+    return () => onFullBusy(false);
+  }, [needFull, fullLoaded, onFullBusy]);
+
+  return (
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        ref={previewRef}
+        alt={item.name}
+        draggable={false}
+        fetchPriority="high"
+        className={`absolute inset-0 size-full object-contain ${fullLoaded ? "invisible" : ""}`}
+        onLoad={onLoad}
+        onError={onError}
+      />
+      {needFull && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          ref={fullRef}
+          alt=""
+          draggable={false}
+          fetchPriority="high"
+          className={`absolute inset-0 size-full object-contain ${fullLoaded ? "" : "opacity-0"}`}
+          onLoad={() => setFullLoaded(true)}
+        />
+      )}
+    </>
   );
 }
 

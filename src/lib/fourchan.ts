@@ -54,6 +54,9 @@ const MEDIA = "https://i.4cdn.org";
 export const isMediaFile = (v: string) =>
   /^\d{10,20}s?\.(jpe?g|png|gif|webp|webm|mp4)$/i.test(v);
 
+// Immagini statiche per cui esiste la preview ridimensionata (niente GIF e video).
+export const isPreviewFile = (v: string) => /^\d{10,20}\.(jpe?g|png|webp)$/i.test(v);
+
 // Streaming con supporto a Range (necessario per seek e Safari sui video).
 export function fetchMedia(board: string, file: string, range: string | null) {
   return fetch(`${MEDIA}/${board}/${file}`, {

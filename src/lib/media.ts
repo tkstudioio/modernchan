@@ -10,7 +10,8 @@ export type ThreadInfo = {
 
 export type Media = {
   id: string;
-  src: string;
+  src: string; // file originale, in piena qualità
+  preview: string; // versione leggera da mostrare nel reel (per GIF e video coincide con src)
   thumb: string;
   video: boolean;
   name: string;
@@ -48,6 +49,7 @@ export function htmlToText(html?: string) {
 }
 
 export const mediaUrl = (board: string, file: string) => `/api/${board}/media/${file}`;
+const PREVIEW_EXT = new Set([".jpg", ".jpeg", ".png", ".webp"]);
 
 export function threadToMedia(board: string, op: string, posts: RawPost[]): Media[] {
   const head = posts[0];
@@ -60,9 +62,11 @@ export function threadToMedia(board: string, op: string, posts: RawPost[]): Medi
   const out: Media[] = [];
   for (const p of posts) {
     if (!p.tim || p.filedeleted || !p.ext || !MEDIA_EXT.has(p.ext)) continue;
+    const src = mediaUrl(board, `${p.tim}${p.ext}`);
     out.push({
       id: `${board}/${p.tim}`,
-      src: mediaUrl(board, `${p.tim}${p.ext}`),
+      src,
+      preview: PREVIEW_EXT.has(p.ext) ? `/api/${board}/preview/${p.tim}${p.ext}` : src,
       thumb: mediaUrl(board, `${p.tim}s.jpg`),
       video: p.ext === ".webm" || p.ext === ".mp4",
       name: (p.filename ?? String(p.tim)) + p.ext,
