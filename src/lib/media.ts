@@ -84,35 +84,58 @@ export function shuffled<T>(arr: T[]): T[] {
   return a;
 }
 
+// Inserisce `add` in posizioni casuali da `from` in poi: la parte prima di
+// `from` (già vista o in visione) non si sposta.
+export function insertRandom<T>(arr: T[], add: T[], from: number): T[] {
+  const a = arr.slice();
+  const lo = Math.min(Math.max(0, from), a.length);
+  for (const x of add) a.splice(lo + Math.floor(Math.random() * (a.length - lo + 1)), 0, x);
+  return a;
+}
+
 export class HttpError extends Error {
   constructor(public status: number) {
     super(`HTTP ${status}`);
   }
 }
 
-async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const r = await fetch(url, { signal });
+async function getJson<T>(url: string, signal?: AbortSignal, priority?: RequestPriority): Promise<T> {
+  const r = await fetch(url, { signal, priority });
   if (!r.ok) throw new HttpError(r.status);
   return r.json();
 }
 
-export async function fetchThreadMedia(board: string, op: string, signal?: AbortSignal) {
-  const data = await getJson<{ posts: RawPost[] }>(`/api/${board}/thread/${op}`, signal);
+export async function fetchThreadMedia(board: string, op: string, signal?: AbortSignal, priority?: RequestPriority) {
+  const data = await getJson<{ posts: RawPost[] }>(`/api/${board}/thread/${op}`, signal, priority);
   return threadToMedia(board, op, data.posts);
 }
 
 // Tutti i media della board: si leggono tutti i thread (6 alla volta) e il
 // risultato resta in cache per 5 minuti per riaperture rapide.
 const BOARD_TTL = 5 * 60 * 1000;
+const BOARD_WORKERS = 6;
 const boardCache = new Map<string, { time: number; list: Media[] }>();
+
+type BoardCallbacks = {
+  // media di ogni thread appena arrivano, prima del relativo onProgress
+  onMedia: (items: Media[]) => void;
+  onProgress: (done: number, total: number) => void;
+  // prima di ogni thread: può attendere (per lasciare la banda ai media) o
+  // restituire false per chiudere quel worker
+  beforeFetch?: (worker: number) => Promise<boolean>;
+};
 
 export async function fetchBoardMedia(
   board: string,
-  onProgress: (done: number, total: number) => void,
+  { onMedia, onProgress, beforeFetch }: BoardCallbacks,
   signal?: AbortSignal,
 ) {
   const hit = boardCache.get(board);
-  if (hit && Date.now() - hit.time < BOARD_TTL) return hit.list;
+  if (hit && Date.now() - hit.time < BOARD_TTL) {
+    onMedia(hit.list);
+    onProgress(1, 1);
+    return hit.list;
+  }
 
   const pages = await getJson<{ threads: { no: number }[] }[]>(`/api/${board}/threads`, signal);
   const threads = pages.flatMap((pg) => pg.threads);
@@ -121,11 +144,16 @@ export async function fetchBoardMedia(
   let done = 0;
   onProgress(0, threads.length);
 
-  const worker = async () => {
+  const worker = async (_: unknown, id: number) => {
     while (next < threads.length) {
+      if (beforeFetch && !(await beforeFetch(id))) return;
+      if (next >= threads.length) return; // finiti durante l'attesa
       const t = threads[next++];
       try {
-        list.push(...(await fetchThreadMedia(board, String(t.no), signal)));
+        // priorità bassa: i media in visione passano avanti
+        const items = await fetchThreadMedia(board, String(t.no), signal, "low");
+        list.push(...items);
+        if (items.length) onMedia(items);
       } catch {
         if (signal?.aborted) return; // annullato: si interrompe
         // thread sparito nel frattempo: lo salta
@@ -133,7 +161,7 @@ export async function fetchBoardMedia(
       onProgress(++done, threads.length);
     }
   };
-  await Promise.all(Array.from({ length: 6 }, worker));
+  await Promise.all(Array.from({ length: BOARD_WORKERS }, worker));
   signal?.throwIfAborted();
 
   boardCache.set(board, { time: Date.now(), list });
