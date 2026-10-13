@@ -15,5 +15,5 @@ export default function RandomPage({ params }: PageProps<"/[board]/random">) {
 async function RandomReel({ params }: { params: PageProps<"/[board]/random">["params"] }) {
   const { board } = await params;
   if (!isBoard(board)) notFound();
-  return <Reel key={board} source={{ kind: "random", board }} />;
+  return <Reel key={board} board={board} />;
 }

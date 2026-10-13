@@ -5,8 +5,6 @@ import { useRouter } from "next/navigation";
 import { fetchBoardMedia, fetchThreadMedia, HttpError, insertRandom, shuffled, type Media } from "@/lib/media";
 import { Viewer } from "./viewer";
 
-export type Source = { kind: "random"; board: string } | { kind: "thread"; board: string; op: string };
-
 // thread letti prima di mostrare il random; il resto continua in background
 const MIN_THREADS = 3;
 // thread scaricati in parallelo mentre il viewer è aperto
@@ -19,14 +17,15 @@ type State =
   | { status: "error"; message: string }
   | { status: "ready" };
 
-// `onClose` di default torna alla lista dei thread della board.
-export function Reel({ source, onClose }: { source: Source; onClose?: () => void }) {
+// Reel casuale con i media di tutti i thread della board; dal titolo si entra
+// nella galleria di un thread. `onClose` di default torna alla lista dei thread.
+export function Reel({ board, onClose }: { board: string; onClose?: () => void }) {
   const router = useRouter();
   const [state, setState] = useState<State>({ status: "loading", done: 0, total: 0 });
   const [list, setList] = useState<Loaded>({ items: [], start: 0, key: 0 });
   // lista del random e posizione, salvate quando si entra in un thread
   const [backTo, setBackTo] = useState<Loaded | null>(null);
-  const [inThread, setInThread] = useState(source.kind === "thread");
+  const [inThread, setInThread] = useState(false);
   // caricamento dei thread ancora in corso a viewer già aperto
   const [background, setBackground] = useState<Progress | null>(null);
   const threadRef = useRef<{ board: string; op: string } | null>(null);
@@ -49,9 +48,6 @@ export function Reel({ source, onClose }: { source: Source; onClose?: () => void
     },
     [wakeWaiters],
   );
-
-  const board = source.board;
-  const op = source.kind === "thread" ? source.op : null;
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -100,25 +96,12 @@ export function Reel({ source, onClose }: { source: Source; onClose?: () => void
       if (!all.length) throw new Error("Nessun media trovato su questa board");
     };
 
-    const run = async () => {
-      try {
-        if (op) {
-          const items = await fetchThreadMedia(board, op, ctrl.signal);
-          if (!items.length) throw new Error("Nessun media in questo thread");
-          threadRef.current = { board, op };
-          setList({ items, start: 0, key: 0 });
-          setState({ status: "ready" });
-        } else {
-          await loadBoard();
-        }
-      } catch (e) {
-        if (ctrl.signal.aborted) return;
-        setState({ status: "error", message: errorMessage(e) });
-      }
-    };
-    run();
+    loadBoard().catch((e) => {
+      if (ctrl.signal.aborted) return;
+      setState({ status: "error", message: errorMessage(e) });
+    });
     return () => ctrl.abort();
-  }, [board, op, wakeWaiters]);
+  }, [board, wakeWaiters]);
 
   const close = useCallback(() => (onClose ? onClose() : router.push(`/${board}`)), [onClose, router, board]);
   const trackIndex = useCallback((i: number) => {
@@ -131,7 +114,7 @@ export function Reel({ source, onClose }: { source: Source; onClose?: () => void
       try {
         const items = await fetchThreadMedia(item.thread.board, item.thread.no);
         if (!items.length) return;
-        if (source.kind === "random" && !backTo) setBackTo({ ...list, start: idx });
+        if (!backTo) setBackTo({ ...list, start: idx });
         threadRef.current = { board: item.thread.board, op: item.thread.no };
         setList((l) => ({
           items,
@@ -141,15 +124,15 @@ export function Reel({ source, onClose }: { source: Source; onClose?: () => void
         setInThread(true);
       } catch {}
     },
-    [backTo, list, source.kind],
+    [backTo, list],
   );
 
   const back = useCallback(() => {
     if (!backTo) return;
     setList((l) => ({ ...backTo, key: l.key + 1 }));
     setBackTo(null);
-    setInThread(source.kind === "thread");
-  }, [backTo, source.kind]);
+    setInThread(false);
+  }, [backTo]);
 
   // fine del thread: rilegge i media per includere i nuovi post
   const refresh = useCallback(async () => {
@@ -175,17 +158,13 @@ export function Reel({ source, onClose }: { source: Source; onClose?: () => void
     const pct = state.total ? (state.done / state.total) * 100 : 0;
     return (
       <Centered>
-        <p className="text-lg">🎲 {op ? `Thread #${op}` : `/${board}/`}</p>
-        {!op && (
-          <>
-            <div className="mt-4 h-1 w-56 overflow-hidden rounded-full bg-white/15">
-              <div className="h-full bg-white transition-[width]" style={{ width: `${pct}%` }} />
-            </div>
-            <p className="mt-2 text-sm tabular-nums text-neutral-400">
-              {state.total ? `${state.done}/${state.total} thread` : "Carico i thread…"}
-            </p>
-          </>
-        )}
+        <p className="text-lg">🎲 /{board}/</p>
+        <div className="mt-4 h-1 w-56 overflow-hidden rounded-full bg-white/15">
+          <div className="h-full bg-white transition-[width]" style={{ width: `${pct}%` }} />
+        </div>
+        <p className="mt-2 text-sm tabular-nums text-neutral-400">
+          {state.total ? `${state.done}/${state.total} thread` : "Carico i thread…"}
+        </p>
       </Centered>
     );
   }
@@ -196,7 +175,7 @@ export function Reel({ source, onClose }: { source: Source; onClose?: () => void
       items={list.items}
       initialIndex={list.start}
       onClose={close}
-      onOpenThread={source.kind === "random" ? openThread : undefined}
+      onOpenThread={openThread}
       onBack={backTo ? back : undefined}
       onRefresh={inThread ? refresh : undefined}
       onIndexChange={trackIndex}

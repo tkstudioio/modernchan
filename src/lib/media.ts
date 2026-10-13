@@ -22,11 +22,17 @@ export type Media = {
 
 type RawPost = {
   no: number;
+  time?: number;
+  name?: string;
   sub?: string;
   com?: string;
   filename?: string;
   ext?: string;
   tim?: number;
+  w?: number;
+  h?: number;
+  tn_w?: number;
+  tn_h?: number;
   filedeleted?: 1;
 };
 
@@ -78,6 +84,26 @@ export function threadToMedia(board: string, op: string, posts: RawPost[]): Medi
   return out;
 }
 
+// Immagine di un post da mostrare in una card: preview piccola per le
+// immagini, miniatura per GIF e video
+export type Cover = { url: string; w: number; h: number; video: boolean; gif: boolean };
+
+const CARD_PREVIEW_WIDTH = 640;
+const hasMedia = (p: RawPost) => !!p.tim && !p.filedeleted && !!p.ext && MEDIA_EXT.has(p.ext);
+
+function coverOf(board: string, p: RawPost): Cover | null {
+  if (!hasMedia(p)) return null;
+  return {
+    url: PREVIEW_EXT.has(p.ext!)
+      ? `/api/${board}/preview/${p.tim}${p.ext}?w=${CARD_PREVIEW_WIDTH}`
+      : mediaUrl(board, `${p.tim}s.jpg`),
+    w: p.w ?? 1,
+    h: p.h ?? 1,
+    video: p.ext === ".webm" || p.ext === ".mp4",
+    gif: p.ext === ".gif",
+  };
+}
+
 // Thread nella lista della board (card stile Reddit)
 export type ThreadSummary = {
   no: number;
@@ -87,40 +113,93 @@ export type ThreadSummary = {
   replies: number;
   media: number; // file nel thread, OP compreso
   sticky: boolean;
-  // immagine dell'OP: preview piccola per le immagini, miniatura per GIF e video
-  cover: { url: string; w: number; h: number; video: boolean; gif: boolean } | null;
+  cover: Cover | null; // immagine dell'OP
 };
 
-const CARD_PREVIEW_WIDTH = 640;
 const SUMMARY_TEXT = 600; // caratteri: il resto non sta comunque nella card
 
-export type CatalogPost = RawPost & { time: number; w?: number; h?: number; replies: number; images: number; sticky?: 1 };
+export type CatalogPost = RawPost & { time: number; replies: number; images: number; sticky?: 1 };
 
 export function catalogToSummaries(board: string, threads: CatalogPost[]): ThreadSummary[] {
-  return threads.map((t) => {
-    const hasFile = !!t.tim && !t.filedeleted && !!t.ext && MEDIA_EXT.has(t.ext);
-    const still = hasFile && PREVIEW_EXT.has(t.ext!);
+  return threads.map((t) => ({
+    no: t.no,
+    title: htmlToText(t.sub),
+    text: htmlToText(t.com).slice(0, SUMMARY_TEXT),
+    time: t.time,
+    replies: t.replies,
+    media: t.images + (hasMedia(t) ? 1 : 0),
+    sticky: !!t.sticky,
+    cover: coverOf(board, t),
+  }));
+}
+
+// Post di un thread, per la vista a card
+export type ThreadPost = {
+  no: number;
+  time: number;
+  name: string;
+  title: string;
+  text: string;
+  file: {
+    media: number; // indice fra i media del thread, per aprire il reel
+    cover: Cover;
+    thumb: { url: string; w: number; h: number };
+  } | null;
+};
+
+// Una card: una risposta al thread e, sotto, i commenti che la citano (>>no),
+// anche indirettamente, in ordine cronologico
+export type ReplyCard = { post: ThreadPost; comments: ThreadPost[] };
+
+export type ThreadData = {
+  op: ThreadPost;
+  cards: ReplyCard[];
+  media: Media[];
+  root: Map<number, number>; // post -> risposta della card che lo contiene
+};
+
+// `>>123`, ma non `>>>/g/123` (link ad altre board)
+export const QUOTE = /(?<!>)>>(\d+)/g;
+
+export function threadToView(board: string, op: string, posts: RawPost[]): ThreadData {
+  const media = threadToMedia(board, op, posts);
+  const mediaIdx = new Map(media.map((m, i) => [m.id, i]));
+  const toPost = (p: RawPost): ThreadPost => {
+    const cover = coverOf(board, p);
     return {
-      no: t.no,
-      title: htmlToText(t.sub),
-      text: htmlToText(t.com).slice(0, SUMMARY_TEXT),
-      time: t.time,
-      replies: t.replies,
-      media: t.images + (hasFile ? 1 : 0),
-      sticky: !!t.sticky,
-      cover: hasFile
-        ? {
-            url: still
-              ? `/api/${board}/preview/${t.tim}${t.ext}?w=${CARD_PREVIEW_WIDTH}`
-              : mediaUrl(board, `${t.tim}s.jpg`),
-            w: t.w ?? 1,
-            h: t.h ?? 1,
-            video: t.ext === ".webm" || t.ext === ".mp4",
-            gif: t.ext === ".gif",
-          }
-        : null,
+      no: p.no,
+      time: p.time ?? 0,
+      name: p.name || "Anonymous",
+      title: htmlToText(p.sub),
+      text: htmlToText(p.com),
+      file: cover && {
+        media: mediaIdx.get(`${board}/${p.tim}`) ?? 0,
+        cover,
+        thumb: { url: mediaUrl(board, `${p.tim}s.jpg`), w: p.tn_w ?? 1, h: p.tn_h ?? 1 },
+      },
     };
-  });
+  };
+
+  const [head, ...replies] = posts;
+  const cards: ReplyCard[] = [];
+  const byNo = new Map<number, ReplyCard>();
+  const root = new Map<number, number>();
+  for (const r of replies) {
+    const post = toPost(r);
+    // decide la prima citazione di un post precedente; l'OP non conta, perché
+    // citarlo è rispondere al thread
+    const parent = [...post.text.matchAll(QUOTE)].map((m) => Number(m[1])).find((q) => q < r.no && root.has(q));
+    const no = parent == null ? r.no : root.get(parent)!;
+    if (parent == null) {
+      const card = { post, comments: [] };
+      cards.push(card);
+      byNo.set(no, card);
+    } else {
+      byNo.get(no)!.comments.push(post);
+    }
+    root.set(r.no, no);
+  }
+  return { op: toPost(head), cards, media, root };
 }
 
 // Fisher-Yates: ogni media compare una sola volta, quindi nessuna ripetizione
@@ -154,9 +233,23 @@ async function getJson<T>(url: string, signal?: AbortSignal, priority?: RequestP
   return r.json();
 }
 
+const getPosts = async (board: string, op: string, signal?: AbortSignal, priority?: RequestPriority) =>
+  (await getJson<{ posts: RawPost[] }>(`/api/${board}/thread/${op}`, signal, priority)).posts;
+
 export async function fetchThreadMedia(board: string, op: string, signal?: AbortSignal, priority?: RequestPriority) {
-  const data = await getJson<{ posts: RawPost[] }>(`/api/${board}/thread/${op}`, signal, priority);
-  return threadToMedia(board, op, data.posts);
+  return threadToMedia(board, op, await getPosts(board, op, signal, priority));
+}
+
+export async function fetchThreadView(board: string, op: string, signal?: AbortSignal) {
+  return threadToView(board, op, await getPosts(board, op, signal));
+}
+
+export function timeAgo(unix: number) {
+  const s = Math.max(0, Date.now() / 1000 - unix);
+  if (s < 60) return "ora";
+  if (s < 3600) return `${Math.floor(s / 60)} min fa`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h fa`;
+  return `${Math.floor(s / 86400)} g fa`;
 }
 
 // Tutti i media della board: si leggono tutti i thread (6 alla volta) e il

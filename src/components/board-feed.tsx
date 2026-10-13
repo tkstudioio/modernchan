@@ -1,11 +1,12 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import type { ThreadSummary } from "@/lib/media";
-import { Reel } from "./reel/reel";
+import { timeAgo, type ThreadSummary } from "@/lib/media";
+import { CoverImage } from "./cover-image";
+import { ThreadView } from "./thread-view";
 
 // Lista dei thread della board, a card. Aprire un thread non cambia pagina: si
-// aggiorna solo l'URL (/{board}/thread/{op}) e il reel compare sopra la lista,
+// aggiorna solo l'URL (/{board}/thread/{op}) e il thread compare sopra la lista,
 // che resta montata e mantiene lo scroll. Il "back" del browser lo richiude.
 export function BoardFeed({ board, threads }: { board: string; threads: ThreadSummary[] }) {
   const pathname = usePathname();
@@ -28,9 +29,7 @@ export function BoardFeed({ board, threads }: { board: string; threads: ThreadSu
         ))}
       </ul>
 
-      {open && (
-        <Reel key={open} source={{ kind: "thread", board, op: open }} onClose={() => window.history.back()} />
-      )}
+      {open && <ThreadView key={open} board={board} op={open} onClose={() => window.history.back()} />}
     </>
   );
 }
@@ -65,20 +64,8 @@ function ThreadCard({
       )}
 
       {t.cover && (
-        <div className="relative mt-3 max-h-[70vh] w-full bg-black" style={{ aspectRatio: `${t.cover.w} / ${t.cover.h}` }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={t.cover.url}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            className="absolute inset-0 size-full object-contain"
-          />
-          {(t.cover.video || t.cover.gif) && (
-            <span className="absolute left-3 top-3 rounded-full bg-black/70 px-2.5 py-1 text-xs font-semibold">
-              {t.cover.video ? "▶ Video" : "GIF"}
-            </span>
-          )}
+        <div className="mt-3">
+          <CoverImage cover={t.cover} />
         </div>
       )}
 
@@ -88,12 +75,4 @@ function ThreadCard({
       </div>
     </a>
   );
-}
-
-function timeAgo(unix: number) {
-  const s = Math.max(0, Date.now() / 1000 - unix);
-  if (s < 60) return "ora";
-  if (s < 3600) return `${Math.floor(s / 60)} min fa`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h fa`;
-  return `${Math.floor(s / 86400)} g fa`;
 }
