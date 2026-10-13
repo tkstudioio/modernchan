@@ -30,7 +30,7 @@ export function BoardForm() {
         disabled={!board}
         className="m-1 rounded-full bg-white px-4 text-sm font-semibold text-black enabled:hover:bg-neutral-200 disabled:opacity-40"
       >
-        🎲 Vai
+        Vai
       </button>
     </form>
   );

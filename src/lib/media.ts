@@ -78,6 +78,51 @@ export function threadToMedia(board: string, op: string, posts: RawPost[]): Medi
   return out;
 }
 
+// Thread nella lista della board (card stile Reddit)
+export type ThreadSummary = {
+  no: number;
+  title: string;
+  text: string;
+  time: number; // unix, secondi
+  replies: number;
+  media: number; // file nel thread, OP compreso
+  sticky: boolean;
+  // immagine dell'OP: preview piccola per le immagini, miniatura per GIF e video
+  cover: { url: string; w: number; h: number; video: boolean; gif: boolean } | null;
+};
+
+const CARD_PREVIEW_WIDTH = 640;
+const SUMMARY_TEXT = 600; // caratteri: il resto non sta comunque nella card
+
+export type CatalogPost = RawPost & { time: number; w?: number; h?: number; replies: number; images: number; sticky?: 1 };
+
+export function catalogToSummaries(board: string, threads: CatalogPost[]): ThreadSummary[] {
+  return threads.map((t) => {
+    const hasFile = !!t.tim && !t.filedeleted && !!t.ext && MEDIA_EXT.has(t.ext);
+    const still = hasFile && PREVIEW_EXT.has(t.ext!);
+    return {
+      no: t.no,
+      title: htmlToText(t.sub),
+      text: htmlToText(t.com).slice(0, SUMMARY_TEXT),
+      time: t.time,
+      replies: t.replies,
+      media: t.images + (hasFile ? 1 : 0),
+      sticky: !!t.sticky,
+      cover: hasFile
+        ? {
+            url: still
+              ? `/api/${board}/preview/${t.tim}${t.ext}?w=${CARD_PREVIEW_WIDTH}`
+              : mediaUrl(board, `${t.tim}s.jpg`),
+            w: t.w ?? 1,
+            h: t.h ?? 1,
+            video: t.ext === ".webm" || t.ext === ".mp4",
+            gif: t.ext === ".gif",
+          }
+        : null,
+    };
+  });
+}
+
 // Fisher-Yates: ogni media compare una sola volta, quindi nessuna ripetizione
 export function shuffled<T>(arr: T[]): T[] {
   const a = arr.slice();

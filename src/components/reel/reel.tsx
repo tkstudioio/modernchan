@@ -19,7 +19,8 @@ type State =
   | { status: "error"; message: string }
   | { status: "ready" };
 
-export function Reel({ source }: { source: Source }) {
+// `onClose` di default torna alla lista dei thread della board.
+export function Reel({ source, onClose }: { source: Source; onClose?: () => void }) {
   const router = useRouter();
   const [state, setState] = useState<State>({ status: "loading", done: 0, total: 0 });
   const [list, setList] = useState<Loaded>({ items: [], start: 0, key: 0 });
@@ -119,7 +120,7 @@ export function Reel({ source }: { source: Source }) {
     return () => ctrl.abort();
   }, [board, op, wakeWaiters]);
 
-  const close = useCallback(() => router.push("/"), [router]);
+  const close = useCallback(() => (onClose ? onClose() : router.push(`/${board}`)), [onClose, router, board]);
   const trackIndex = useCallback((i: number) => {
     posRef.current = i;
   }, []);
@@ -164,7 +165,7 @@ export function Reel({ source }: { source: Source }) {
       <Centered>
         <p className="text-red-300">{state.message}</p>
         <button onClick={close} className="mt-4 rounded-full bg-white/15 px-4 py-2 text-sm hover:bg-white/25">
-          Torna alla home
+          Torna ai thread
         </button>
       </Centered>
     );

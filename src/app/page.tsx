@@ -1,24 +1,28 @@
 import Link from "next/link";
 import { BoardForm } from "@/components/board-form";
+import { getBoards, type Board } from "@/lib/fourchan";
 
-const BOARDS = [
-  { id: "g", name: "Technology" },
-  { id: "a", name: "Anime & Manga" },
-  { id: "v", name: "Video Games" },
-  { id: "wg", name: "Wallpapers" },
-  { id: "wsg", name: "Worksafe GIF" },
-  { id: "gif", name: "GIF" },
-  { id: "ck", name: "Food & Cooking" },
-  { id: "diy", name: "Do It Yourself" },
-  { id: "sci", name: "Science & Math" },
-  { id: "mu", name: "Music" },
-  { id: "fit", name: "Fitness" },
-  { id: "tv", name: "Television & Film" },
+// usato solo se 4chan non risponde
+const FALLBACK: Board[] = [
+  { id: "g", name: "Technology", sfw: true },
+  { id: "a", name: "Anime & Manga", sfw: true },
+  { id: "v", name: "Video Games", sfw: true },
+  { id: "wg", name: "Wallpapers/General", sfw: true },
+  { id: "wsg", name: "Worksafe GIF", sfw: true },
+  { id: "ck", name: "Food & Cooking", sfw: true },
+  { id: "diy", name: "Do It Yourself", sfw: true },
+  { id: "sci", name: "Science & Math", sfw: true },
+  { id: "mu", name: "Music", sfw: true },
+  { id: "fit", name: "Fitness", sfw: true },
+  { id: "tv", name: "Television & Film", sfw: true },
+  { id: "gif", name: "Adult GIF", sfw: false },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const boards = await getBoards().catch(() => FALLBACK);
+
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col items-center justify-center gap-10 px-6 py-16">
+    <main className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col items-center justify-center gap-10 px-6 py-16">
       <header className="text-center">
         <h1 className="text-4xl font-semibold tracking-tight">Modernchan</h1>
         <p className="mt-3 text-neutral-400">
@@ -28,8 +32,24 @@ export default function Home() {
 
       <BoardForm />
 
-      <ul className="grid w-full grid-cols-2 gap-3 sm:grid-cols-3">
-        {BOARDS.map((b) => (
+      <BoardList title="Worksafe" boards={boards.filter((b) => b.sfw)} />
+      <BoardList title="NSFW" boards={boards.filter((b) => !b.sfw)} />
+
+      <p className="text-center text-xs text-neutral-500">
+        Scorciatoie nel feed: ↑↓ naviga · Spazio autoplay · M audio · F schermo intero · D scarica · P vai al post ·
+        +/− secondi · doppio tap zoom · Esc esci
+      </p>
+    </main>
+  );
+}
+
+function BoardList({ title, boards }: { title: string; boards: Board[] }) {
+  if (!boards.length) return null;
+  return (
+    <section className="w-full">
+      <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-neutral-500">{title}</h2>
+      <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+        {boards.map((b) => (
           <li key={b.id}>
             <Link
               href={`/${b.id}`}
@@ -41,10 +61,6 @@ export default function Home() {
           </li>
         ))}
       </ul>
-
-      <p className="text-center text-xs text-neutral-500">
-        Scorciatoie nel feed: ↑↓ naviga · Spazio autoplay · M audio · F schermo intero · P vai al post · +/− secondi · Esc esci
-      </p>
-    </main>
+    </section>
   );
 }

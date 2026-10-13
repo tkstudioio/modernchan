@@ -1,4 +1,5 @@
 import { cacheLife } from "next/cache";
+import type { CatalogPost } from "./media";
 
 const API = "https://a.4cdn.org";
 
@@ -46,6 +47,24 @@ export async function getThread(board: string, op: string) {
   "use cache";
   cacheLife({ stale: 300, revalidate: 300, expire: 3600 });
   return getJson<{ posts: Post[] }>(`/${board}/thread/${op}.json`);
+}
+
+// Una sola richiesta per tutti i thread della board, con l'OP di ognuno.
+export async function getCatalog(board: string) {
+  "use cache";
+  cacheLife({ stale: 300, revalidate: 300, expire: 3600 });
+  return getJson<{ page: number; threads: CatalogPost[] }[]>(`/${board}/catalog.json`);
+}
+
+export type Board = { id: string; name: string; sfw: boolean };
+
+// L'elenco delle board cambia di rado.
+export async function getBoards(): Promise<Board[]> {
+  "use cache";
+  cacheLife("days");
+  const data = await getJson<{ boards: { board: string; title: string; ws_board: number }[] }>("/boards.json");
+  if (!data) throw new UpstreamError(404);
+  return data.boards.map((b) => ({ id: b.board, name: b.title, sfw: b.ws_board === 1 }));
 }
 
 const MEDIA = "https://i.4cdn.org";
