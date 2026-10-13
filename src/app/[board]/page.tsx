@@ -5,6 +5,12 @@ import { BoardFeed } from "@/components/board-feed";
 import { getBoards, getCatalog, isBoard } from "@/lib/fourchan";
 import { catalogToSummaries } from "@/lib/media";
 
+// Con Cache Components serve almeno una board. Le altre si generano alla prima
+// visita e poi restano in cache (CDN compresa) quanto `getCatalog`.
+export function generateStaticParams() {
+  return [{ board: "g" }];
+}
+
 export default function BoardPage({ params }: PageProps<"/[board]">) {
   return (
     <Suspense fallback={<FeedSkeleton />}>
@@ -17,7 +23,7 @@ async function Board({ params }: { params: PageProps<"/[board]">["params"] }) {
   const { board } = await params;
   if (!isBoard(board)) notFound();
 
-  const [pages, boards] = await Promise.all([getCatalog(board), getBoards().catch(() => [])]);
+  const [pages, boards] = await Promise.all([getCatalog(board), getBoards()]);
   if (!pages) notFound();
   const threads = catalogToSummaries(
     board,

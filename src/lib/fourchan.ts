@@ -36,35 +36,63 @@ async function getJson<T>(path: string): Promise<T | null> {
   return res.json();
 }
 
+// Durata della cache di thread e liste di thread: anche la pagina della board e
+// le risposte /api la usano, quindi è il ritardo massimo con cui si vede 4chan.
+export const THREADS_TTL = 600;
+const threadsLife = { stale: 300, revalidate: THREADS_TTL, expire: 3600 };
+
 // Gli errori non vengono mai messi in cache: lanciare fa saltare il salvataggio.
 export async function getThreadList(board: string) {
   "use cache";
-  cacheLife({ stale: 300, revalidate: 300, expire: 3600 });
+  cacheLife(threadsLife);
   return getJson<ThreadsPage[]>(`/${board}/threads.json`);
 }
 
 export async function getThread(board: string, op: string) {
   "use cache";
-  cacheLife({ stale: 300, revalidate: 300, expire: 3600 });
+  cacheLife(threadsLife);
   return getJson<{ posts: Post[] }>(`/${board}/thread/${op}.json`);
 }
 
 // Una sola richiesta per tutti i thread della board, con l'OP di ognuno.
 export async function getCatalog(board: string) {
   "use cache";
-  cacheLife({ stale: 300, revalidate: 300, expire: 3600 });
+  cacheLife(threadsLife);
   return getJson<{ page: number; threads: CatalogPost[] }[]>(`/${board}/catalog.json`);
 }
 
 export type Board = { id: string; name: string; sfw: boolean };
 
-// L'elenco delle board cambia di rado.
+// usato solo se 4chan non risponde
+const FALLBACK_BOARDS: Board[] = [
+  { id: "g", name: "Technology", sfw: true },
+  { id: "a", name: "Anime & Manga", sfw: true },
+  { id: "v", name: "Video Games", sfw: true },
+  { id: "wg", name: "Wallpapers/General", sfw: true },
+  { id: "wsg", name: "Worksafe GIF", sfw: true },
+  { id: "ck", name: "Food & Cooking", sfw: true },
+  { id: "diy", name: "Do It Yourself", sfw: true },
+  { id: "sci", name: "Science & Math", sfw: true },
+  { id: "mu", name: "Music", sfw: true },
+  { id: "fit", name: "Fitness", sfw: true },
+  { id: "tv", name: "Television & Film", sfw: true },
+  { id: "gif", name: "Adult GIF", sfw: false },
+];
+
+// L'elenco delle board cambia di rado. Se 4chan non risponde si usa quello di
+// riserva, ma solo per pochi minuti: la homepage (statica) dura quanto questa
+// cache e non deve restare per un giorno con l'elenco ridotto.
 export async function getBoards(): Promise<Board[]> {
   "use cache";
-  cacheLife("days");
-  const data = await getJson<{ boards: { board: string; title: string; ws_board: number }[] }>("/boards.json");
-  if (!data) throw new UpstreamError(404);
-  return data.boards.map((b) => ({ id: b.board, name: b.title, sfw: b.ws_board === 1 }));
+  try {
+    const data = await getJson<{ boards: { board: string; title: string; ws_board: number }[] }>("/boards.json");
+    if (!data) throw new UpstreamError(404);
+    cacheLife("days");
+    return data.boards.map((b) => ({ id: b.board, name: b.title, sfw: b.ws_board === 1 }));
+  } catch {
+    cacheLife("minutes");
+    return FALLBACK_BOARDS;
+  }
 }
 
 const MEDIA = "https://i.4cdn.org";

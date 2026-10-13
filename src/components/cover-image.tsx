@@ -9,19 +9,18 @@ import type { Cover } from "@/lib/media";
 export function CoverImage({ cover }: { cover: Cover }) {
   return (
     <div className="relative max-h-[70vh] w-full bg-black" style={{ aspectRatio: `${cover.w} / ${cover.h}` }}>
-      {cover.video ? (
-        <CardVideo src={cover.video} poster={cover.url} />
-      ) : (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={cover.url}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          draggable={false}
-          className="absolute inset-0 size-full object-contain"
-        />
-      )}
+      {/* anche per i video: `poster` si scarica subito, un'img lazy solo vicino allo schermo */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={cover.url}
+        alt=""
+        loading="lazy"
+        decoding="async"
+        draggable={false}
+        className="absolute inset-0 size-full object-contain"
+      />
+      {/* senza poster il video resta trasparente finché non ha un fotogramma */}
+      {cover.video && <CardVideo src={cover.video} />}
       {(cover.video || cover.gif) && <MediaLabel video={!!cover.video} />}
     </div>
   );
@@ -30,7 +29,7 @@ export function CoverImage({ cover }: { cover: Cover }) {
 // quota del video che deve essere sullo schermo per farlo partire
 const VISIBLE = 0.6;
 
-function CardVideo({ src, poster }: { src: string; poster: string }) {
+function CardVideo({ src }: { src: string }) {
   const ref = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -61,7 +60,6 @@ function CardVideo({ src, poster }: { src: string; poster: string }) {
   return (
     <video
       ref={ref}
-      poster={poster}
       muted
       loop
       playsInline

@@ -75,16 +75,31 @@ function BoardList({ title, boards }: { title: string; boards: Board[] }) {
       <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
         {boards.map((b) => (
           <li key={b.id}>
-            <Link
-              href={`/${b.id}`}
-              className="flex h-full flex-col rounded-2xl border border-white/10 bg-white/5 px-4 py-3 transition-colors hover:border-white/30 hover:bg-white/10"
-            >
-              <span className="font-semibold">/{b.id}/</span>
-              <span className="text-sm text-neutral-400">{b.name}</span>
-            </Link>
+            <BoardLink board={b} />
           </li>
         ))}
       </ul>
     </section>
+  );
+}
+
+// Prefetch solo quando l'utente punta la board. Il prefetch di default, appena il
+// link è visibile, fa generare le pagine delle board non ancora in cache: una
+// chiamata a 4chan per ogni board sullo schermo.
+function BoardLink({ board: b }: { board: Board }) {
+  const [intent, setIntent] = useState(false);
+  const show = () => setIntent(true);
+  return (
+    <Link
+      href={`/${b.id}`}
+      prefetch={intent}
+      onMouseEnter={show}
+      onTouchStart={show}
+      onFocus={show}
+      className="flex h-full flex-col rounded-2xl border border-white/10 bg-white/5 px-4 py-3 transition-colors hover:border-white/30 hover:bg-white/10"
+    >
+      <span className="font-semibold">/{b.id}/</span>
+      <span className="text-sm text-neutral-400">{b.name}</span>
+    </Link>
   );
 }

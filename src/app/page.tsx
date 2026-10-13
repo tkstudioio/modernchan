@@ -1,24 +1,8 @@
 import { BoardBrowser } from "@/components/board-browser";
-import { getBoards, type Board } from "@/lib/fourchan";
-
-// usato solo se 4chan non risponde
-const FALLBACK: Board[] = [
-  { id: "g", name: "Technology", sfw: true },
-  { id: "a", name: "Anime & Manga", sfw: true },
-  { id: "v", name: "Video Games", sfw: true },
-  { id: "wg", name: "Wallpapers/General", sfw: true },
-  { id: "wsg", name: "Worksafe GIF", sfw: true },
-  { id: "ck", name: "Food & Cooking", sfw: true },
-  { id: "diy", name: "Do It Yourself", sfw: true },
-  { id: "sci", name: "Science & Math", sfw: true },
-  { id: "mu", name: "Music", sfw: true },
-  { id: "fit", name: "Fitness", sfw: true },
-  { id: "tv", name: "Television & Film", sfw: true },
-  { id: "gif", name: "Adult GIF", sfw: false },
-];
+import { getBoards } from "@/lib/fourchan";
 
 export default async function Home() {
-  const boards = await getBoards().catch(() => FALLBACK);
+  const boards = await getBoards();
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-3xl flex-col items-center gap-10 px-6 py-16">
