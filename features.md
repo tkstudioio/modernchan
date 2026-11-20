@@ -28,7 +28,7 @@ Chanousel è un feed verticale stile reel per i media dei thread e delle board d
 ## 3. Viewer a tutto schermo
 
 - Un media alla volta, a tutto schermo, sfondo nero, `object-fit: contain` (anche i file piccoli vengono ingranditi).
-- Navigazione **verticale** stile reel con animazione di scorrimento:
+- Navigazione **verticale** stile Instagram: l intera schermata (media e UI) segue il dito e scorre alla successiva:
   rotellina (con throttle), swipe touch (soglia 50px), frecce.
 - Navigazione circolare: dopo l'ultimo si torna al primo.
 - Precaricamento dell'immagine successiva.
@@ -38,18 +38,18 @@ Chanousel è un feed verticale stile reel per i media dei thread e delle board d
 
 ## 4. Autoplay
 
-- Attivo di default; pulsante ❚❚/▶ in alto a destra o `Spazio`.
-- **Immagini**: restano a schermo per un intervallo configurabile (1–60 s, default 5 s), con barra di progresso animata in alto.
+- Attivo di default; pulsante ❚❚/▶ o `Spazio`. Vale solo per i video.
+- **Immagini**: non avanzano da sole; si passa alla successiva con scorrimento, frecce o rotella.
 - **Video**: riprodotti fino alla fine, poi si passa al successivo; con autoplay fermo vanno in loop.
 - Barra di progresso dei video basata sul tempo di riproduzione.
 - Arrivato all'ultimo media su un thread, **ricontrolla la pagina** per includere i nuovi post, poi riparte da capo.
-- L'intervallo scelto è **persistente** (`localStorage`).
+
 
 ## 5. Video
 
 - Nessun controllo nativo: un **tap/click mette in pausa o riprende**.
-- **Audio attivo di default**; se il browser blocca l'autoplay con audio, riparte automaticamente muto.
-- Tasto `M` per attivare/disattivare l'audio (solo per la sessione, non persistente).
+- **Audio disattivato di default** (solo per la sessione), tasto `M` per attivarlo.
+
 - Il media precedente viene fermato e scaricato (`src` rimosso) per liberare risorse.
 
 ## 6. Card del thread

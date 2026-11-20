@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { Media } from "@/lib/media";
 import {
   ArrowLeftIcon,
@@ -16,26 +17,10 @@ import {
 import { Stage } from "./stage";
 import { ThreadCard } from "./thread-card";
 
-const STORE = "modernchan:";
-const MIN_INTERVAL = 1;
-const MAX_INTERVAL = 60;
 const WHEEL_THROTTLE = 450;
 const SWIPE_THRESHOLD = 50;
-
-function loadInterval() {
-  try {
-    const v = Number(localStorage.getItem(STORE + "interval"));
-    return v >= MIN_INTERVAL && v <= MAX_INTERVAL ? v : 5;
-  } catch {
-    return 5;
-  }
-}
-
-function saveInterval(v: number) {
-  try {
-    localStorage.setItem(STORE + "interval", String(v));
-  } catch {}
-}
+const SLIDE_MS = 260;
+const TAP_SLOP = 8; // px prima che un tocco diventi un trascinamento
 
 type Props = {
   items: Media[];
@@ -63,10 +48,10 @@ export function Viewer({
   badge,
 }: Props) {
   const [idx, setIdx] = useState(initialIndex < items.length ? initialIndex : 0);
-  const [dir, setDir] = useState(0); // 1 = si arriva dal basso, -1 = dall'alto
-  const [playing, setPlaying] = useState(true); // autoplay di default
-  const [muted, setMuted] = useState(false); // audio attivo di default (solo per la sessione)
-  const [interval, setIntervalSec] = useState(loadInterval);
+  // autoplay: a fine video si passa al successivo (le immagini non avanzano da
+  // sole); fermo, il video riparte da capo
+  const [playing, setPlaying] = useState(true);
+  const [muted, setMuted] = useState(true); // audio disattivato di default (solo per la sessione)
   const [cardOpen, setCardOpen] = useState(false);
   const [loadedId, setLoadedId] = useState<string | null>(null);
   const [errorId, setErrorId] = useState<string | null>(null);
@@ -78,6 +63,8 @@ export function Viewer({
   const rootRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null); // le tre schermate (precedente, corrente, successiva)
+  const sliding = useRef(false);
   const resumeVideo = useRef(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const lastWheel = useRef(0);
@@ -94,13 +81,32 @@ export function Viewer({
     toastTimer.current = setTimeout(() => setToast(null), 1400);
   }, []);
 
+  // Cambia schermata: l'intera schermata (media e UI) scorre di una pagina, con
+  // la successiva che entra da sotto; `d` è 1 per andare avanti, -1 indietro.
+  // Senza `animate` (salti a inizio/fine) il cambio è immediato.
   const go = useCallback(
-    (i: number, d: number) => {
-      if (!items.length) return;
-      setIdx((i + items.length) % items.length);
-      setDir(d);
-      setCardOpen(false);
-      setInspecting(false);
+    (i: number, d: number, animate = true) => {
+      if (!items.length || sliding.current) return;
+      const target = (i + items.length) % items.length;
+      const track = trackRef.current;
+      const commit = () => {
+        sliding.current = false;
+        // il nuovo media deve essere montato prima che il binario torni a zero
+        flushSync(() => {
+          setIdx(target);
+          setCardOpen(false);
+          setInspecting(false);
+        });
+        if (track) {
+          track.style.transition = "none";
+          track.style.transform = "";
+        }
+      };
+      if (!animate || !track || items.length < 2) return commit();
+      sliding.current = true;
+      track.style.transition = `transform ${SLIDE_MS}ms ease-out`;
+      track.style.transform = `translateY(${-d * 100}%)`;
+      setTimeout(commit, SLIDE_MS);
     },
     [items.length],
   );
@@ -125,16 +131,6 @@ export function Viewer({
 
   const prev = useCallback(() => go(idx - 1, -1), [go, idx]);
 
-  const changeInterval = useCallback(
-    (delta: number) => {
-      const v = Math.min(MAX_INTERVAL, Math.max(MIN_INTERVAL, interval + delta));
-      setIntervalSec(v);
-      saveInterval(v);
-      flash(`${v} s per immagine`);
-    },
-    [flash, interval],
-  );
-
   const toggleMute = useCallback(() => {
     setMuted((m) => {
       flash(m ? "Audio attivo" : "Audio disattivato");
@@ -148,6 +144,11 @@ export function Viewer({
       return !p;
     });
   }, [flash]);
+
+  // a fine video, con l'autoplay attivo, si passa al successivo
+  const onVideoEnded = useCallback(() => {
+    if (playing) next();
+  }, [playing, next]);
 
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
@@ -193,14 +194,6 @@ export function Viewer({
     }
   }, [inspecting]);
 
-  // autoplay delle immagini: avanza dopo `interval` secondi dal caricamento
-  const isImage = item && !item.video;
-  useEffect(() => {
-    if (!isImage || !loaded || !playing || inspecting) return;
-    const t = setTimeout(next, interval * 1000);
-    return () => clearTimeout(t);
-  }, [isImage, loaded, playing, inspecting, interval, next]);
-
   // file non caricabile: salta al successivo se l'autoplay è attivo
   useEffect(() => {
     if (!failed || !playing || inspecting) return;
@@ -218,32 +211,6 @@ export function Viewer({
   useEffect(() => {
     onBusyChange?.(busy);
   }, [busy, onBusyChange]);
-
-  // precarica l'immagine successiva, ma solo a media corrente scaricato per non
-  // rubargli banda. Un precaricamento rimasto indietro viene interrotto, salvo
-  // che sia proprio il media ora in visione (la richiesta in corso serve).
-  const preload = useRef<HTMLImageElement | null>(null);
-  const currentSrc = item?.preview;
-  useEffect(() => {
-    const n = items[(idx + 1) % items.length];
-    const want = loaded && n && !n.video ? n.preview : null;
-    const old = preload.current;
-    if (old?.dataset.src === want) return;
-    if (old && old.dataset.src !== currentSrc) old.removeAttribute("src");
-    preload.current = null;
-    if (!want) return;
-    const img = new Image();
-    img.dataset.src = want;
-    img.src = want;
-    preload.current = img;
-  }, [idx, items, loaded, currentSrc]);
-
-  useEffect(
-    () => () => {
-      if (preload.current && !preload.current.complete) preload.current.removeAttribute("src");
-    },
-    [],
-  );
 
   useEffect(() => {
     const onChange = () => setFullscreen(!!document.fullscreenElement);
@@ -278,11 +245,8 @@ export function Viewer({
       ArrowLeft: prev,
       " ": togglePlaying,
       Escape: onClose,
-      Home: () => go(0, -1),
-      End: () => go(items.length - 1, 1),
-      "+": () => changeInterval(1),
-      "=": () => changeInterval(1),
-      "-": () => changeInterval(-1),
+      Home: () => go(0, -1, false),
+      End: () => go(items.length - 1, 1, false),
       m: toggleMute,
       f: toggleFullscreen,
       p: openPost,
@@ -312,17 +276,133 @@ export function Viewer({
     else prev();
   };
 
+  // la schermata segue il dito; a fine gesto scorre alla successiva o torna a posto
+  const dragStart = useRef<number | null>(null);
+  const onTouchMove = (e: React.TouchEvent) => {
+    const track = trackRef.current;
+    if (!track || touchY.current == null || inspecting || sliding.current || e.touches.length > 1) return;
+    if (cardOpen && (e.target as HTMLElement).closest("[data-scroll]")) return;
+    const dy = e.touches[0].clientY - touchY.current;
+    if (dragStart.current == null && Math.abs(dy) < TAP_SLOP) return;
+    dragStart.current = touchY.current;
+    track.style.transition = "none";
+    track.style.transform = `translateY(${dy}px)`;
+  };
+
   const onTouchEnd = (e: React.TouchEvent) => {
-    if (touchY.current == null) return;
-    const dy = e.changedTouches[0].clientY - touchY.current;
+    const start = touchY.current;
     touchY.current = null;
-    if (!inspecting && Math.abs(dy) > SWIPE_THRESHOLD) {
+    if (start == null || dragStart.current == null) return;
+    dragStart.current = null;
+    const dy = e.changedTouches[0].clientY - start;
+    if (Math.abs(dy) > SWIPE_THRESHOLD && !inspecting) {
       if (dy < 0) next();
       else prev();
+    }
+    // nessuno scorrimento in corso (soglia non raggiunta, o ultima pagina in attesa di ricarica): torna a posto
+    if (!sliding.current && trackRef.current) {
+      trackRef.current.style.transition = `transform ${SLIDE_MS}ms ease-out`;
+      trackRef.current.style.transform = "";
     }
   };
 
   if (!item) return null;
+
+  // Una schermata completa: media (o anteprima, per le adiacenti) e UI. Le
+  // adiacenti sono inerti e servono solo a farle scorrere insieme alla corrente.
+  const slide = (o: -1 | 0 | 1) => {
+    const it = items[(idx + o + items.length) % items.length];
+    const live = o === 0;
+    return (
+      <div key={o} className="absolute inset-0" style={{ transform: `translateY(${o * 100}%)` }} inert={!live}>
+        <div key={it.id} className="absolute inset-0">
+          {!live ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={o === 1 && loaded && !it.video ? it.preview : it.thumb}
+              alt=""
+              draggable={false}
+              className="absolute inset-0 size-full object-contain"
+            />
+          ) : failed ? (
+            <div className="grid h-full place-items-center text-red-300">Impossibile caricare il file</div>
+          ) : (
+            <Stage inspecting={inspecting} onTap={it.video ? toggleVideo : undefined} onDoubleTap={toggleInspect}>
+              {it.video ? (
+                <VideoSlide
+                  item={it}
+                  videoRef={videoRef}
+                  muted={muted}
+                  playing={playing}
+                  frozen={inspecting}
+                  barRef={barRef}
+                  onEnded={onVideoEnded}
+                  onError={() => setErrorId(it.id)}
+                  onLoaded={() => setLoadedId(it.id)}
+                  onMutedFallback={() => setMuted(true)}
+                />
+              ) : (
+                <ImageSlide
+                  item={it}
+                  full={inspecting}
+                  onLoad={() => setLoadedId(it.id)}
+                  onError={() => setErrorId(it.id)}
+                  onFullBusy={setFullBusy}
+                />
+              )}
+            </Stage>
+          )}
+        </div>
+
+        {/* in modalità visualizzazione la UI è solo nascosta, non smontata */}
+        <div className={inspecting ? "hidden" : "contents"}>
+          {/* barra di progresso dei video, legata al tempo di riproduzione */}
+          <div className="absolute inset-x-0 top-0 z-20 h-[3px] bg-white/15">
+            {it.video && <div ref={live ? barRef : undefined} className="h-full w-0 bg-white" />}
+          </div>
+
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="absolute left-4 top-4 z-20 flex items-center gap-1.5 rounded-full border border-white/30 px-3.5 py-2 text-xs font-semibold transition-colors hover:bg-white/20"
+            >
+              <ArrowLeftIcon width={14} height={14} className="drop-shadow" /> Torna al random
+            </button>
+          )}
+
+          {badge && <div className="absolute right-4 top-4 z-20">{badge}</div>}
+
+          <div className="absolute bottom-6 right-4 z-20 flex flex-col gap-3">
+            <RoundButton onClick={togglePlaying} label={playing ? "Ferma autoplay (Spazio)" : "Avvia autoplay (Spazio)"}>
+              {playing ? <PauseIcon /> : <PlayIcon />}
+            </RoundButton>
+            <RoundButton onClick={toggleMute} label={muted ? "Attiva audio (M)" : "Disattiva audio (M)"}>
+              {muted ? <VolumeOffIcon /> : <VolumeIcon />}
+            </RoundButton>
+            <RoundButton onClick={toggleFullscreen} label={fullscreen ? "Esci da schermo intero (F)" : "Schermo intero (F)"}>
+              <ExpandIcon />
+            </RoundButton>
+            <RoundButton onClick={download} label="Scarica (D)">
+              <DownloadIcon />
+            </RoundButton>
+            <RoundButton href={it.postUrl} label="Vai al post su 4chan (P)">
+              <ExternalIcon />
+            </RoundButton>
+            <RoundButton onClick={onClose} label="Chiudi (Esc)">
+              <CloseIcon />
+            </RoundButton>
+          </div>
+
+          <ThreadCard
+            item={it}
+            open={live && cardOpen}
+            onToggle={() => setCardOpen((o) => !o)}
+            onOpenThread={live && onOpenThread ? () => onOpenThread(it, idx) : undefined}
+          />
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div
@@ -330,96 +410,14 @@ export function Viewer({
       className="fixed inset-0 z-50 select-none overflow-hidden overscroll-none bg-black text-white [touch-action:none]"
       onWheel={onWheel}
       onTouchStart={(e) => (touchY.current = e.touches[0].clientY)}
+      onTouchMove={onTouchMove}
       onTouchEnd={onTouchEnd}
+      onTouchCancel={onTouchEnd}
     >
-      <div key={item.id} className={`absolute inset-0 ${dir > 0 ? "animate-slide-up" : dir < 0 ? "animate-slide-down" : ""}`}>
-        {failed ? (
-          <div className="grid h-full place-items-center text-red-300">Impossibile caricare il file</div>
-        ) : (
-          <Stage inspecting={inspecting} onTap={item.video ? toggleVideo : undefined} onDoubleTap={toggleInspect}>
-            {item.video ? (
-              <VideoSlide
-                item={item}
-                videoRef={videoRef}
-                muted={muted}
-                playing={playing}
-                frozen={inspecting}
-                barRef={barRef}
-                onEnded={() => playing && next()}
-                onError={() => setErrorId(item.id)}
-                onLoaded={() => setLoadedId(item.id)}
-                onMutedFallback={() => setMuted(true)}
-              />
-            ) : (
-              <ImageSlide
-                item={item}
-                full={inspecting}
-                onLoad={() => setLoadedId(item.id)}
-                onError={() => setErrorId(item.id)}
-                onFullBusy={setFullBusy}
-              />
-            )}
-          </Stage>
-        )}
-      </div>
-
-      {/* in modalità visualizzazione la UI è solo nascosta, non smontata */}
-      <div className={inspecting ? "hidden" : "contents"}>
-        {/* barra di progresso: animata per le immagini, legata al tempo di riproduzione per i video */}
-        <div className="absolute inset-x-0 top-0 z-20 h-[3px] bg-white/15">
-          {isImage ? (
-            <div
-              key={`${item.id}-${interval}-${playing}-${loaded}-${inspecting}`}
-              className="h-full bg-white"
-              style={
-                playing && loaded
-                  ? { animation: `progress ${interval}s linear forwards` }
-                  : { width: 0 }
-              }
-            />
-          ) : (
-            <div ref={barRef} className="h-full w-0 bg-white" />
-          )}
-        </div>
-
-        {onBack && (
-          <button
-            onClick={onBack}
-            className="absolute left-4 top-4 z-20 flex items-center gap-1.5 rounded-full border border-white/30 px-3.5 py-2 text-xs font-semibold transition-colors hover:bg-white/20"
-          >
-            <ArrowLeftIcon width={14} height={14} className="drop-shadow" /> Torna al random
-          </button>
-        )}
-
-        {badge && <div className="absolute right-4 top-4 z-20">{badge}</div>}
-
-        <div className="absolute bottom-6 right-4 z-20 flex flex-col gap-3">
-          <RoundButton onClick={togglePlaying} label={playing ? "Ferma autoplay (Spazio)" : "Avvia autoplay (Spazio)"}>
-            {playing ? <PauseIcon /> : <PlayIcon />}
-          </RoundButton>
-          <RoundButton onClick={toggleMute} label={muted ? "Attiva audio (M)" : "Disattiva audio (M)"}>
-            {muted ? <VolumeOffIcon /> : <VolumeIcon />}
-          </RoundButton>
-          <RoundButton onClick={toggleFullscreen} label={fullscreen ? "Esci da schermo intero (F)" : "Schermo intero (F)"}>
-            <ExpandIcon />
-          </RoundButton>
-          <RoundButton onClick={download} label="Scarica (D)">
-            <DownloadIcon />
-          </RoundButton>
-          <RoundButton href={item.postUrl} label="Vai al post su 4chan (P)">
-            <ExternalIcon />
-          </RoundButton>
-          <RoundButton onClick={onClose} label="Chiudi (Esc)">
-            <CloseIcon />
-          </RoundButton>
-        </div>
-
-        <ThreadCard
-          item={item}
-          open={cardOpen}
-          onToggle={() => setCardOpen((o) => !o)}
-          onOpenThread={onOpenThread && (() => onOpenThread(item, idx))}
-        />
+      <div ref={trackRef} className="absolute inset-0 will-change-transform">
+        {items.length > 1 && slide(-1)}
+        {slide(0)}
+        {items.length > 1 && slide(1)}
       </div>
 
       {/* senza UI non c'è altro modo di capire che l'originale sta arrivando */}
@@ -542,15 +540,9 @@ type VideoProps = {
   barRef: React.RefObject<HTMLDivElement | null>;
   onEnded: () => void;
   onError: () => void;
-  onLoaded: () => void; // file scaricato, o il browser ha smesso di scaricarlo
+  onLoaded: () => void; // abbastanza dati per partire: il resto arriva a blocchi dal proxy
   onMutedFallback: () => void;
 };
-
-// tutto il file è nel buffer
-function fullyBuffered(v: HTMLVideoElement) {
-  const b = v.buffered;
-  return v.duration > 0 && b.length === 1 && b.start(0) <= 0.1 && b.end(0) >= v.duration - 0.1;
-}
 
 // Nessun controllo nativo: un tap (gestito dallo Stage) mette in pausa o riprende.
 function VideoSlide({
@@ -593,7 +585,6 @@ function VideoSlide({
   const start = () => {
     const v = ref.current;
     if (!v) return;
-    if (fullyBuffered(v)) onLoaded(); // già in cache
     if (frozen) return;
     // l'audio attivo può essere bloccato dal browser: in quel caso riparte muto
     v.play().catch(() => {
@@ -614,12 +605,7 @@ function VideoSlide({
       onLoadedData={start}
       onEnded={onEnded}
       onError={onError}
-      onProgress={(e) => fullyBuffered(e.currentTarget) && onLoaded()}
-      // in pausa il browser può fermare il download: la banda torna libera
-      onSuspend={(e) => {
-        const v = e.currentTarget;
-        if (fullyBuffered(v) || (v.paused && v.readyState >= 2)) onLoaded();
-      }}
+      onCanPlay={onLoaded}
       onTimeUpdate={(e) => {
         const v = e.currentTarget;
         if (barRef.current && v.duration) barRef.current.style.width = `${(v.currentTime / v.duration) * 100}%`;
